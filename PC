@@ -1,0 +1,157 @@
+pragma solidity ^0.4.16;
+
+contract PC{
+    bool public state;
+    address public owner;
+    address public customer;
+    address public investmentAdvisor;
+    address public SCCA;	
+    string public institutionName;
+	string public productName;
+	uint public deposit;
+	enum PCStatus {WaitingforIssuer, Terminated}
+	PCStatus public status;
+	enum customerStatus {IssuerDeposited, OwnerRefunded, WaitingforCustomerDecision, SuccessfulinvestmentAdvisory, ProductDispute, investmentAdvisoryCompleted}
+    Property[] public proProperties;
+    Commitment[] public proCommitments;
+	mapping (address => Customer) public customers;
+    
+    event StatusChanged (string Status);
+	event OwnerDepositedandPaid (address OwnerAddress, string info);
+    event RefundBasedOnOwnerRequest (string info, address OwnerAddress);	
+	event PropertyAdded (address OwnerAddress, string ProductName, string ProductProperties);
+	event CommitmentAdded (address OwnerAddress, string ProductName, string ProductCommitments);
+    event ASuccessfulinvestmentAdvisory (address CustomerAddress, string info); 
+	event ProductControversy (address CustomerAddress, string info);
+	event SCCAIsVerifyingforCustomer (address CustomerAddress, address OwnerAddress, address investmentAdvisorAddress, string info);
+	event ProductFraud (address OwnerAddress, address CustomerAddress, address investmentAdvisorAddress, string info);
+	event CompensationDone (address CustomerAddress, string info);
+	event WillingnesstoSign (address OwnerAddress, string info);
+	event CustomerPunished(address CustomerAddress, string info);
+
+    struct Property {
+        address owner;
+	    string productName;
+		string productProperties;        
+	    uint propertySince;
+    }
+    struct Commitment {
+        address owner;
+	    string productName;
+        string productCommitments;
+	    uint commitmentSince;
+    }
+    struct Customer {
+	    customerStatus status;
+	}	
+  
+    modifier onlyOwner {
+        require (msg.sender == owner);
+	    _;
+    }
+	
+	modifier onlyCustomer {
+	    require (msg.sender == customer);
+		_;
+	}
+	
+	modifier onlyinvestmentAdvisor {
+	    require (msg.sender == investmentAdvisor);
+		_;
+	}
+	
+	modifier onlySCCA {
+	    require (msg.sender == SCCA);
+		_;
+	}
+	
+	modifier ownerCost {
+	    require (msg.value == deposit);
+		_;
+	}
+
+    function PC (string enterinstitutionName, string enterProductName) public {
+        owner = 0x8020A2bd757d33e6Fd5F5212bF6F7b8025563Cb4;
+		investmentAdvisor = 0x75afF96CC8E304a943237Cd933E0fdC4B212d745;
+		customer = 0x5BFc90dF1DE9355F818ED99733B597268c90C01E;
+		SCCA = 0xd8BE8bF315475A19737cd710dE4deAE466706991;
+	    state = true;
+	    institutionName = enterinstitutionName;
+        productName = enterProductName;      	
+	    AddAttribute (0,"","");
+        AddPromise (0,"","");	    
+        deposit = 9 ether;		
+    }
+	
+    function ChangeStatus (bool deactivate) onlyOwner public {
+        if (deactivate)
+	    {state = false;}
+	    StatusChanged ("Smart Contract Deactivated");
+    }
+	
+	function PublishProduct() onlyOwner ownerCost public payable {
+        require(status == PCStatus.WaitingforIssuer);
+        customers[msg.sender].status = customerStatus.IssuerDeposited;
+        OwnerDepositedandPaid(msg.sender, "Issuer deposited");    
+    }
+	
+    function OwnerRefund() onlyOwner public payable {
+        require(customers[msg.sender].status == customerStatus.IssuerDeposited);
+        uint x = deposit;
+        msg.sender.transfer(x);
+        customers[msg.sender].status = customerStatus.OwnerRefunded;
+        RefundBasedOnOwnerRequest("Issuer has been refunded", msg.sender);
+    }
+	
+    function AddAttribute (address ownerAddress, string proName, string properties) onlyOwner public {
+        require(customers[ownerAddress].status == customerStatus.IssuerDeposited);
+	    uint id = proProperties.length++;
+        proProperties[id] = Property ({owner: ownerAddress, productName: proName, productProperties: properties, propertySince: now});
+	    PropertyAdded (ownerAddress, proName, properties);        
+    }
+	
+    function AddPromise (address ownerAddress, string proName, string commitments) onlyOwner public {
+        require(customers[ownerAddress].status == customerStatus.IssuerDeposited);
+	    uint id = proCommitments.length++;
+	    proCommitments[id] = Commitment ({owner: ownerAddress, productName: proName, productCommitments: commitments, commitmentSince: now});
+	    CommitmentAdded (ownerAddress, proName, commitments);
+		customers[ownerAddress].status = customerStatus.WaitingforCustomerDecision;
+    }
+
+    function CheckProduct(address ownerAddress, address investmentAdvisorAddress, int result) onlyCustomer public{
+        require (customers[ownerAddress].status == customerStatus.WaitingforCustomerDecision);
+        if(result == 1)//1 represents the investmentAdvisory service is successful. 
+        {
+          ASuccessfulinvestmentAdvisory(msg.sender, "The investmentAdvisory service is successful.");
+          customers[ownerAddress].status = customerStatus.SuccessfulinvestmentAdvisory;
+          SignApplication(ownerAddress);
+        }
+        else if(result == 2){//2 represents the product has a fraud dispute.
+          ProductControversy(msg.sender, "This product has a fraudulent dispute.");
+          customers[ownerAddress].status = customerStatus.ProductDispute;
+          SCCAIsVerifyingforCustomer(msg.sender, ownerAddress, investmentAdvisorAddress, "The SCCA intervenes in the dispute arbitration.");
+        }        
+    }
+	
+	function SolveControversy(address ownerAddress, address customerAddress, address investmentAdvisorAddress, bool arbitrationResult) onlySCCA public payable{
+        require(customers[ownerAddress].status == customerStatus.ProductDispute);		
+        if(arbitrationResult){//This product is fraudulent.
+           ProductFraud(ownerAddress, customerAddress, investmentAdvisorAddress, "The product is fraudulent.");
+		   uint x = deposit;
+           customerAddress.transfer(x);//compensate to the customer         
+		   CompensationDone(customerAddress, "The customer has been compensated.");
+           customers[ownerAddress].status = customerStatus.investmentAdvisoryCompleted;
+        }
+        else{//This product is not deceptive.
+          ASuccessfulinvestmentAdvisory(customerAddress, "The investmentAdvisory service is successful.");
+		  customers[ownerAddress].status = customerStatus.SuccessfulinvestmentAdvisory;
+          CustomerPunished(customerAddress, "The customer will be punished.");            
+        }
+    }
+
+    function SignApplication(address ownerAddress) internal{//smart contract internal call
+        require(customers[ownerAddress].status == customerStatus.SuccessfulinvestmentAdvisory);               
+        WillingnesstoSign(ownerAddress, "The customer is willing to buy the financial product.");
+        customers[ownerAddress].status = customerStatus.investmentAdvisoryCompleted;
+    }    
+}
