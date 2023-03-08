@@ -1,0 +1,156 @@
+pragma solidity ^0.4.16;
+
+contract AC{
+    bool public state;
+    address public owner;
+	address public investmentAdvisor;
+	address public customer;
+    address public SCCA;	
+    string public institutionName; 
+	string public productName;
+	string public contractName; 
+    uint public numberOfinvestmentAdvisors;	
+    mapping (address => uint) public investmentAdvisorId;
+    InvestmentAdvisor[] public investmentAdvisors;	
+	uint public deposit;	
+	enum ACStatus {WaitingforinvestmentAdvisor, Aborted}
+    ACStatus public status;	
+	enum customerStatus {investmentAdvisorDeposited, waitingforCustomer, investmentAdvisorRefunded, customerDeposited, investmentAdvisoryCompleted}    
+    mapping (address => Customer) public customers; 
+
+    event StatusChanged(string Status);
+	event investmentAdvisorAdded(address investmentAdvisorAddress, string investmentAdvisorProduct, string investmentAdvisorNotes);
+    event investmentAdvisorRemoved(address investmentAdvisorAddress);    
+	event investmentAdvisorDepositedandPaid(address investmentAdvisorAddress, string info); 
+	event CustomerDepositedandPaid(address CustomerAddress, string info);
+	event RefundBasedOninvestmentAdvisorRequest(string info, address investmentAdvisorAddress);
+	event CustomerRefuned(address CustomerAddress, string info);
+	event CustomerFined(address CustomerAddress, string info);
+	
+	struct InvestmentAdvisor {
+        address investmentAdvisoraddress;
+	    string productname;
+	    string productnotes;		
+	    uint investmentAdvisorSince;
+    }
+		
+	struct Customer {       
+		customerStatus status;        	    
+    }
+	
+    modifier onlyOwner {
+        require (msg.sender == owner);
+	    _;
+    }
+	
+	modifier onlyinvestmentAdvisor {
+        require (msg.sender == investmentAdvisor);
+	    _;
+    }
+	
+	modifier onlyCustomer {
+        require (msg.sender == customer);
+	    _;
+    }
+	
+	modifier onlySCCA {
+        require (msg.sender == SCCA);
+	    _;
+    }
+	
+	modifier investmentAdvisorCost(){
+        require(msg.value == deposit);
+        _;
+    }
+	
+	modifier customerCost(){
+        require(msg.value == deposit);
+        _;
+    }
+
+    function AC(string enterinstitutionName, string enterProductName, string enterContractName) public {
+        owner = 0x8020A2bd757d33e6Fd5F5212bF6F7b8025563Cb4;
+		investmentAdvisor = 0x75afF96CC8E304a943237Cd933E0fdC4B212d745;
+		customer = 0x5BFc90dF1DE9355F818ED99733B597268c90C01E;
+		SCCA = 0xd8BE8bF315475A19737cd710dE4deAE466706991;
+	    state = true;	
+	    AddInvestmentAdvisor (0,"","");
+	    institutionName = enterinstitutionName;
+		productName = enterProductName;
+		contractName = enterContractName;
+        numberOfinvestmentAdvisors = 0;	    
+		deposit = 3 ether;		
+    }
+	
+    function ChangeStatus (bool deactivate) onlyOwner public {
+        if(deactivate)
+	    {state = false;}
+	    StatusChanged ("Smart Contract Deactivated");
+    }
+	
+	function RequestAuthorization() onlyinvestmentAdvisor investmentAdvisorCost public payable {
+        require(status == ACStatus.WaitingforinvestmentAdvisor);
+        customers[msg.sender].status = customerStatus.investmentAdvisorDeposited;
+        investmentAdvisorDepositedandPaid(msg.sender, "investmentAdvisor deposited");    
+    }
+	
+    function RefundInvestmentAdvisor() onlyinvestmentAdvisor public payable {
+        require(customers[msg.sender].status == customerStatus.investmentAdvisorDeposited);
+        uint x = deposit;
+        msg.sender.transfer(x);
+        customers[msg.sender].status = customerStatus.investmentAdvisorRefunded;
+        RefundBasedOninvestmentAdvisorRequest("investmentAdvisor has been refunded", msg.sender);
+    }
+	
+    function AddInvestmentAdvisor(address investmentAdvisorAddress, string investmentAdvisorProduct, string investmentAdvisorNotes) onlyOwner public {
+        require(customers[investmentAdvisorAddress].status == customerStatus.investmentAdvisorDeposited);
+	    uint id = investmentAdvisorId[investmentAdvisorAddress];
+	    if (id == 0) {
+	    investmentAdvisorId[investmentAdvisorAddress] = investmentAdvisors.length;
+	    id = investmentAdvisors.length++;
+	}
+	    investmentAdvisors[id] = InvestmentAdvisor ({investmentAdvisoraddress: investmentAdvisorAddress, productname: investmentAdvisorProduct, productnotes: investmentAdvisorNotes, investmentAdvisorSince: now});
+        investmentAdvisorAdded (investmentAdvisorAddress, investmentAdvisorProduct, investmentAdvisorNotes);
+	    numberOfinvestmentAdvisors++;
+		customers[investmentAdvisorAddress].status = customerStatus.waitingforCustomer;
+    }
+	
+    function RemoveInvestmentAdvisor(address investmentAdvisorAddress) onlyOwner public {
+        require(investmentAdvisorId[investmentAdvisorAddress] != 0);
+	    for (uint i = investmentAdvisorId[investmentAdvisorAddress]; i < investmentAdvisors.length-1; i++){
+	    investmentAdvisors[i] = investmentAdvisors[i+1];
+	}
+	    delete investmentAdvisors[investmentAdvisors.length-1];
+	    investmentAdvisors.length--;
+	    investmentAdvisorRemoved(investmentAdvisorAddress);
+	    numberOfinvestmentAdvisors--;
+    }
+	
+	function RequestProduct(address investmentAdvisorAddress) onlyCustomer customerCost public payable {
+        require(customers[investmentAdvisorAddress].status == customerStatus.waitingforCustomer);
+        customers[investmentAdvisorAddress].status = customerStatus.customerDeposited;
+        CustomerDepositedandPaid(msg.sender, "Customer deposited");		
+    }
+	
+	function RequestSigning(address investmentAdvisorAddress) onlyCustomer customerCost public payable {
+        require(customers[investmentAdvisorAddress].status == customerStatus.waitingforCustomer);
+        customers[investmentAdvisorAddress].status = customerStatus.customerDeposited;
+        CustomerDepositedandPaid(msg.sender, "Customer deposited");		
+    }
+	
+	function CustomerRefund(address customerAddress, address investmentAdvisorAddress, int result) onlySCCA public payable {
+        require(result == 1);//1 represents the customer will be refunded. 	
+        uint x = deposit;        
+        customerAddress.transfer(x);		
+        CustomerRefuned(customerAddress, "The customer has been refunded.");
+        customers[investmentAdvisorAddress].status = customerStatus.investmentAdvisoryCompleted;
+    }
+	
+	function Punishment(address customerAddress, address investmentAdvisorAddress, int result) onlySCCA public payable {
+        require(result == 2);//2 represents the customer will be fined. 	
+        uint x = deposit;        
+        owner.transfer(x);		
+        CustomerFined(customerAddress, "The customer has been fined.");
+        customers[investmentAdvisorAddress].status = customerStatus.investmentAdvisoryCompleted;
+    }	
+}
